@@ -1,6 +1,3 @@
-
-
-### 
 I first run the code to see whether results match and the output is correct. The output verified that
 the code runs correctly. To benchmark the code, I simply used the "timeit" library. I imported the
 get_score function from the python file to a jupyter notebook. Because for this micro scale our input
