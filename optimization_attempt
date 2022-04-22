@@ -1,0 +1,85 @@
+%load_ext cython
+%%cython -a
+# cython: profile=True
+
+import numpy as np
+from math import comb
+import glob
+import joblib
+import itertools
+
+import redis
+import json
+import pickle
+
+
+redis_db = redis.StrictRedis(host="localhost", port=6379, db=1)
+
+
+def correlation(listx, listy, offset, int min_overlap=20): 
+    if offset > 0: 
+        listx = listx[offset:]
+        listy = listy[:len(listx)]
+    elif offset < 0:
+        offset = -offset
+        listy = listy[offset:]
+        listx = listx[:len(listy)]
+    
+    if min(len(listx), len(listy)) < min_overlap:
+        return None
+    
+    if len(listx) > len(listy):
+        listx = listx[:len(listy)]
+    elif len(listx) < len(listy):
+        listy = listy[:len(listx)]
+    
+    cdef int distance= np.sum(np.vectorize(lambda x: x.count("1")/32)(np.vectorize(np.binary_repr)(np.bitwise_xor(listx,listy),width=32)))
+    
+    return 1-(distance/len(listx))
+
+
+def get_score(int[:] liste,int n=2,int span=300, int step=1):
+   
+    cdef int[:] first=d[liste[0]]
+    cdef int[:] second=d[liste[1]]
+    
+    if span > min(len(first), len(second)):
+        span = min(len(first), len(second)) -1
+    
+    corr = []
+    for offset in range(-span, span + 1, step):
+        corr.append(correlation(first, second, offset))
+    
+    cdef int max_corr=0
+    cdef int max_corr_offset=0
+    for i,c in enumerate(corr):
+        if c!=None and c>max_corr:
+            max_corr=c
+            max_corr_offset=i-span
+    
+    return max_corr
+
+def results(fingerprints,int n=2):     
+    cdef int [:,:,:] combines= np.array(list(itertools.combinations(range(2), 2)))  
+    cdef int [:,:,:] result=np.apply_along_axis(get_score,1,combines)
+    result_dict={}
+    for i in range(len(combines)):
+        result_dict[tuple(combines[i])]=result[i]
+    for k,v in result_dict.items():
+        redis_db.set(str(k), float(v))
+
+    print(f"{n} fingers = "+str(len(result_dict.keys()))+" results.")
+    return result_dict
+
+
+fingerprints=[]
+for file in sorted(glob.glob("das_data/fingerprints/*.fp")):
+    fingerprints.append(joblib.load(file))
+print(f"Loaded {len(fingerprints)} fingerprints")
+    
+    
+keyList= list(range(2))  
+d = {}
+for i in keyList:
+    d[i] = fingerprints[:][i]
+    
